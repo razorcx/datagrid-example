@@ -16,7 +16,7 @@ namespace DataGridExample
 		{
 			Application.EnableVisualStyles();
 			Application.SetCompatibleTextRenderingDefault(false);
-			Application.Run(new DataGridExample());
+			Application.Run(new QuickViewer());
 		}
 	}
 }

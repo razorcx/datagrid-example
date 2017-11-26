@@ -1,73 +1,146 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
-using System.ComponentModel;
-using System.Data;
-using System.Drawing;
-using System.IO;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using TSDUI = Tekla.Structures.Dialog.UIControls;
 using System.Windows.Forms;
+using Tekla.Structures;
 using Tekla.Structures.Model;
 
 namespace DataGridExample
 {
-	public partial class DataGridExample : Form
+	public partial class QuickViewer : Form
 	{
-		public DataGridExample()
+		private readonly Model _model = new Model();
+		private dynamic _data;
+
+		public QuickViewer()
 		{
 			InitializeComponent();
 
-			var beamNames = GetBeams()
-				.Select(b => b.Name)
-				.Distinct()
-				.OrderBy(b => b)
-				.ToList();
-
-			this.cmbBoxMember.DataSource = beamNames;
+			this.cmbBoxMember.DataSource = GetBeamNames();
 		}
 
 		private void btnRefresh_Click(object sender, EventArgs e)
 		{
-			this.dataGridMembers.DataSource = GetData();
+			var beams = GetBeams();
+			GetData(beams);
+			this.txtBoxSearch.Text = string.Empty;
+			this.dataGridMembers.DataSource = _data;
 		}
 
 		private void cmbBoxMember_SelectedIndexChanged(object sender, EventArgs e)
 		{
-			this.dataGridMembers.DataSource = GetData();
+			var beams = GetBeams();
+			GetData(beams);
+			this.txtBoxSearch.Text = string.Empty;
+			this.dataGridMembers.DataSource = _data;
 		}
 
-		private dynamic GetData()
+		private List<string> GetBeamNames()
 		{
-			var beams = GetBeams();
+			return 
+				GetBeams()
+				.Select(b => b.Name)
+				.Distinct()
+				.OrderBy(b => b)
+				.ToList();
+		}
 
-			var beamsReport = beams
+		private void GetData(List<Beam> beams)
+		{
+			_data = beams
 				.Where(b => b.Name == this.cmbBoxMember.Text)
-				.Select(b => new
+				.Select(b =>
 				{
-					Name = b.Name,
-					Profile = b.Profile.ProfileString,
-					Class = b.Class,
-					Finish = b.Finish,
-					Material = b.Material.MaterialString
+					var phase = -1;
+					b.GetReportProperty("PHASE", ref phase);
+
+					var assemblyPos = string.Empty;
+					b.GetReportProperty("ASSEMBLY_POS", ref assemblyPos);
+
+					return new
+					{
+						Id = b.Identifier.ID,
+						Phase = phase,
+						Assembly_Mark = assemblyPos,
+						Name = b.Name,
+						Profile = b.Profile.ProfileString,
+						Class = b.Class,
+						Finish = b.Finish,
+						Material = b.Material.MaterialString,
+					};
 				})
-				.OrderBy(b => b.Name)
+				.OrderBy(b => b.Phase)
+				.ThenBy(b => b.Name)
 				.ThenBy(b => b.Profile)
 				.ToList();
-
-			return beamsReport;
 		}
 
 		private List<Beam> GetBeams()
 		{
 			ModelObjectEnumerator.AutoFetch = true;
-			var moe = new Model().GetModelObjectSelector().GetAllObjectsWithType(ModelObject.ModelObjectEnum.BEAM);
+			var moe = _model.GetModelObjectSelector().GetAllObjectsWithType(ModelObject.ModelObjectEnum.BEAM);
+			return 
+				moe
+				.ToList()
+				.OfType<Beam>()
+				.ToList();
+		}
 
-			var modelObjects = moe.ToList();
+		private void SelectModelObjectsInUi(List<int> ids)
+		{
+			var modelObjects = new ArrayList();
 
-			var beams = modelObjects.OfType<Beam>().ToList();
+			ids.ForEach(id => 
+			{
+				var modelObject = _model.SelectModelObject(new Identifier(id));
+				if (modelObject == null) return;
+				modelObjects.Add(modelObject);
+			});
 
-			return beams;
+			var selector = new Tekla.Structures.Model.UI.ModelObjectSelector();
+			selector.Select(modelObjects);
+		}
+
+		private void txtBoxSearch_TextChanged(object sender, EventArgs e)
+		{
+			var searchText = ((TextBox) sender).Text;
+			if (string.IsNullOrEmpty(searchText)) return;
+
+			var beams = GetBeams()
+				.Where(b => b.Name == this.cmbBoxMember.Text)
+				.Where(b =>
+				{
+					var assemblyPos = string.Empty;
+					b.GetReportProperty("ASSEMBLY_POS", ref assemblyPos);
+
+					return assemblyPos.Contains(searchText);
+				})
+				.ToList();
+
+			GetData(beams);
+			this.dataGridMembers.DataSource = _data;
+		}
+
+		private void dataGridMembers_SelectionChanged(object sender, EventArgs e)
+		{
+			var selectedRows = GetSelectedRows(sender);
+			var ids = GetIds(selectedRows);
+			SelectModelObjectsInUi(ids);
+		}
+
+		private List<DataGridViewRow> GetSelectedRows(object sender)
+		{
+			var dataGrid = sender as TSDUI.DataGrid;
+			return dataGrid?.SelectedRows.OfType<DataGridViewRow>().ToList();
+		}
+
+		private List<int> GetIds(List<DataGridViewRow> rows)
+		{
+			return rows
+				.Select(r => (int)((dynamic)r.DataBoundItem).Id)
+				.ToList();
 		}
 	}
 }
